@@ -34,7 +34,7 @@
 #include "kafka_common.h"
 #endif
 
-int bgp_peer_log_msg(struct bgp_node *route, struct bgp_info *ri, safi_t safi, char *event_type, int output, int log_type)
+int bgp_peer_log_msg(struct bgp_node *route, struct bgp_info *ri, afi_t afi, safi_t safi, char *event_type, int output, int log_type)
 {
   struct bgp_misc_structs *bms;
   char log_rk[SRVBUFLEN];
@@ -118,6 +118,14 @@ int bgp_peer_log_msg(struct bgp_node *route, struct bgp_info *ri, safi_t safi, c
     json_decref(kv);
 
     kv = json_pack("{ss}", "event_type", event_type);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+
+    kv = json_pack("{sI}", "afi", (json_int_t) afi);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+
+    kv = json_pack("{sI}", "safi", (json_int_t) safi);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
@@ -279,7 +287,7 @@ int bgp_peer_log_init(struct bgp_peer *peer, int output, int type)
 
 #ifdef WITH_KAFKA
     if (bms->msglog_kafka_topic)
-      p_kafka_set_topic(peer->log->amqp_host, peer->log->filename);
+      p_kafka_set_topic(peer->log->kafka_host, peer->log->filename);
 
     if (bms->msglog_kafka_topic_rr && !p_kafka_get_topic_rr(peer->log->kafka_host)) {
       p_kafka_init_topic_rr(peer->log->kafka_host);
@@ -742,7 +750,7 @@ void bgp_handle_dump_event()
 	      for (peer_buckets = 0; peer_buckets < config.bgp_table_per_peer_buckets; peer_buckets++) {
 	        for (ri = node->info[modulo+peer_buckets]; ri; ri = ri->next) {
 		  if (ri->peer == peer) {
-	            bgp_peer_log_msg(node, ri, safi, event_type, config.bgp_table_dump_output, BGP_LOG_TYPE_MISC);
+	            bgp_peer_log_msg(node, ri, afi, safi, event_type, config.bgp_table_dump_output, BGP_LOG_TYPE_MISC);
 	            dump_elems++;
 		  }
 		}

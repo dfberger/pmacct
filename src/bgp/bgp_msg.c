@@ -283,15 +283,16 @@ int bgp_parse_open_msg(struct bgp_peer *peer, char *bgp_packet_ptr, time_t now, 
 	}
       }
 
-      if (online)
-        Log(LOG_INFO, "INFO ( %s/%s ): [%s] BGP_OPEN: Asn: %u HoldTime: %u\n", config.name,
-		bms->log_str, bgp_peer_print(peer), peer->as, peer->ht);
-
       if (online) {
         bgp_reply_pkt_ptr = bgp_reply_pkt;
 
         /* Replying to OPEN message */
-        peer->myas = peer->as;
+	if (!config.nfacctd_bgp_as) peer->myas = peer->as;
+	else peer->myas = config.nfacctd_bgp_as;
+
+        Log(LOG_INFO, "INFO ( %s/%s ): [%s] BGP_OPEN: Local AS: %u Remote AS: %u HoldTime: %u\n", config.name,
+		bms->log_str, bgp_peer_print(peer), peer->myas, peer->as, peer->ht);
+
         ret = bgp_write_open_msg(bgp_reply_pkt_ptr, bgp_open_cap_reply, bgp_open_cap_reply_ptr-bgp_open_cap_reply, peer);
         if (ret > 0) bgp_reply_pkt_ptr += ret;
         else {
@@ -412,6 +413,42 @@ int bgp_write_open_msg(char *msg, char *cp_msg, int cp_msglen, struct bgp_peer *
   memcpy(msg+BGP_MIN_OPEN_MSG_SIZE, cp_msg, cp_msglen);
 
   return BGP_MIN_OPEN_MSG_SIZE + cp_msglen;
+}
+
+int bgp_write_notification_msg(char *msg, int msglen, char *shutdown_msg)
+{
+  struct bgp_notification *bn_reply = (struct bgp_notification *) msg;
+  struct bgp_notification_shutdown_msg *bnsm_reply;
+  int ret = FALSE, shutdown_msglen;
+  char *reply_msg_ptr;
+
+  if (msglen >= BGP_MIN_NOTIFICATION_MSG_SIZE) {
+    memset(bn_reply->bgpn_marker, 0xff, BGP_MARKER_SIZE);
+    bn_reply->bgpn_len = ntohs(BGP_MIN_NOTIFICATION_MSG_SIZE); 
+    bn_reply->bgpn_type = BGP_NOTIFICATION; 
+    bn_reply->bgpn_major = BGP_NOTIFY_CEASE;
+    bn_reply->bgpn_minor = BGP_NOTIFY_CEASE_ADMIN_SHUTDOWN;
+    ret += BGP_MIN_NOTIFICATION_MSG_SIZE;
+
+    /* draft-ietf-idr-shutdown-01 */
+    /* XXX: todo: conversion of shutdown_msg to utf8 */
+    shutdown_msglen = strlen(shutdown_msg) + 1;
+
+    if (shutdown_msg && (shutdown_msglen <= BGP_NOTIFY_CEASE_SM_LEN)) {
+      if (msglen >= (BGP_MIN_NOTIFICATION_MSG_SIZE + shutdown_msglen)) {
+        reply_msg_ptr = (char *) (msg + BGP_MIN_NOTIFICATION_MSG_SIZE);
+        memset(reply_msg_ptr, 0, shutdown_msglen);
+        bnsm_reply = (struct bgp_notification_shutdown_msg *) reply_msg_ptr;
+
+        bnsm_reply->bgpnsm_len = shutdown_msglen;
+        strncpy(bnsm_reply->bgpnsm_data, shutdown_msg, shutdown_msglen);
+	bn_reply->bgpn_len = htons(BGP_MIN_NOTIFICATION_MSG_SIZE + shutdown_msglen + 1 /* bgpnsm_len */);
+        ret += (shutdown_msglen + 1 /* bgpnsm_len */);
+      }
+    }
+  }
+
+  return ret;
 }
 
 int bgp_parse_update_msg(struct bgp_peer *peer, char *pkt)
@@ -1069,7 +1106,7 @@ log_update:
   {
     char event_type[] = "log";
 
-    bgp_peer_log_msg(route, ri, safi, event_type, bms->msglog_output, BGP_LOG_TYPE_UPDATE);
+    bgp_peer_log_msg(route, ri, afi, safi, event_type, bms->msglog_output, BGP_LOG_TYPE_UPDATE);
   }
 
   return SUCCESS;
@@ -1115,7 +1152,7 @@ int bgp_process_withdraw(struct bgp_peer *peer, struct prefix *p, void *attr, af
   if (ri && bms->msglog_backend_methods) {
     char event_type[] = "log";
 
-    bgp_peer_log_msg(route, ri, safi, event_type, bms->msglog_output, BGP_LOG_TYPE_WITHDRAW);
+    bgp_peer_log_msg(route, ri, afi, safi, event_type, bms->msglog_output, BGP_LOG_TYPE_WITHDRAW);
   }
 
   /* Withdraw specified route from routing table. */

@@ -472,7 +472,7 @@ int bgp_peer_init(struct bgp_peer *peer, int type)
   return ret;
 }
 
-void bgp_peer_close(struct bgp_peer *peer, int type /* XXX */)
+void bgp_peer_close(struct bgp_peer *peer, int type /* XXX */, int send_notification, char *shutdown_msg)
 {
   struct bgp_misc_structs *bms;
   afi_t afi;
@@ -483,6 +483,14 @@ void bgp_peer_close(struct bgp_peer *peer, int type /* XXX */)
   bms = bgp_select_misc_db(peer->type);
 
   if (!bms) return;
+
+  if (send_notification) {
+    int ret, notification_msglen = (BGP_MIN_NOTIFICATION_MSG_SIZE + BGP_NOTIFY_CEASE_SM_LEN + 1);
+    char notification_msg[notification_msglen];
+
+    ret = bgp_write_notification_msg(notification_msg, notification_msglen, shutdown_msg);
+    if (ret) send(peer->fd, notification_msg, ret, 0);
+  }
 
   bgp_peer_info_delete(peer);
 
@@ -549,7 +557,7 @@ void bgp_peer_info_delete(struct bgp_peer *peer)
 	      if (bms->msglog_backend_methods) {
 		char event_type[] = "log";
 
-		bgp_peer_log_msg(node, ri, safi, event_type, bms->msglog_output, BGP_LOG_TYPE_DELETE);
+		bgp_peer_log_msg(node, ri, afi, safi, event_type, bms->msglog_output, BGP_LOG_TYPE_DELETE);
 	      }
 
 	      ri_next = ri->next; /* let's save pointer to next before free up */
